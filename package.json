@@ -1,29 +1,28 @@
 {
 	"name": "rationalacoustics-smaart3",
-	"version": "1.0.5",
+	"version": "2.0.0",
 	"description": "Rational Acoustics Smaart(API V3) for Companion.",
-	"main": "index.js",
+	"main": "main.js",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"format": "prettier -w .",
+		"package": "companion-module-build"
 	},
-	"author": "Todd Murphy <murphytodd4@gmail.com>",
 	"license": "MIT",
-	"keywords": [
-		"Audio"
-	],
-	"manufacturer": "Rational Acoustics",
-	"product": [
-		"Smaart V8.3 - V8.5",
-		"Smaart Di 2.1 and newer"
-	],
-	"shortname": "Smaart-V3",
-	"homepage": "https://github.com/bitfocus/companion-module-rationalacoustics-smaart3#readme",
-	"bugs": {
-		"url": "https://github.com/bitfocus/companion-module-rationalacoustics-smaart3/issues"
-	},
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/bitfocus/companion-module-rationalacoustics-smaart3.git"
 	},
-	"api_version": "1.0.0"
+	"dependencies": {
+		"@companion-module/base": "~1.2.1",
+		"object-path": "^0.11.8",
+		"ws": "^7.5.10"
+	},
+	"devDependencies": {
+		"@companion-module/tools": "^2.1.1",
+		"eslint": "^9.18.0",
+		"prettier": "^3.4.2"
+	},
+	"prettier": "@companion-module/tools/.prettierrc.json",
+	"packageManager": "yarn@4.5.3"
 }
