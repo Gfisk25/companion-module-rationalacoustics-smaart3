@@ -1,161 +1,65 @@
-const { InstanceBase, Regex, runEntrypoint, InstanceStatus } = require('@companion-module/base')
-const UpgradeScripts = require('./upgrades')
+// main.js
+const {
+	InstanceBase,
+	runEntrypoint,
+	Regex,
+	InstanceStatus,
+	TCPHelper,
+} = require('@companion-module/base')
+
+
+const UpgradeScripts = require('./upgrades') // or []
 const UpdateActions = require('./actions')
 const UpdateFeedbacks = require('./feedbacks')
 const UpdateVariableDefinitions = require('./variables')
-const WebSocket     = require('ws');
+const UpdatePresets = require('./presets')
 
-
-class ModuleInstance extends InstanceBase {  //PREV constructor(system, id, config) {
+class ModuleInstance extends InstanceBase {
 	constructor(internal) {
 		super(internal)
+
+		// Track TCP socket and connection status
+		this.socket = undefined
+		this.isConnected = false
 	}
 
-
-	//PREV 
-	//  this.defineConst('RECONNECT_TIMEOUT', 10); // Number of seconds to try reconnect
-	//	this.reconnecting = null;
-	//	this.closing = false;
-	//	this.actions(); // export actions
-
+	/**
+	 * Called once the instance is created, with user config loaded.
+	 */
 	async init(config) {
 		this.config = config
 
-		this.updateStatus(InstanceStatus.Ok)
+		// Attempt to connect immediately
+		this.initTCP()
 
-		this.updateActions() // export actions
-		this.updateFeedbacks() // export feedbacks
-		this.updateVariableDefinitions() // export variable definitions
-	
-	//PREV
-	//updateConfig(config) {
-	//	this.config = config;
-	//	this.logout();
-	//	if(this.config.host && this.config.port) {
-	//		this.login();
-		
-	
-
-
-
-	/**
-	 * Main initialization when it's ok to login
-	 * @access public
-	 * @since 1.0.0
-	 */
-	
-		this.status(this.STATUS_UNKNOWN);
-//		this.initVariables();
-
-		if(this.config.host && this.config.port) {
-			this.login();
-		}
+		// Register all definitions
+		this.updateActions()
+		this.updateFeedbacks()
+		this.updatePresets()
+		this.updateVariableDefinitions()
 	}
 
 	/**
-	 * Try login again after timeout
-	 * @param {Int} timeout Timeout to try reconnection
-	 * @access public
-	 * @since 1.0.0
+	 * Called when module is removed/disabled. Close resources here.
 	 */
-	keep_login_retry(timeout) {
-		if(this.reconnecting) {
-			return;
-		}
-
-		this.log('info', 'Attempting to reconnect in ' + timeout + ' seconds.');
-		this.reconnecting = setTimeout(this.login.bind(this), timeout * 1000);
+	async destroy() {
+		this.log('debug', 'destroy')
+		this.closeSocket()
 	}
 
 	/**
-	 * Login to the device
-	 * @param {Boolean} retry Set to true to continue retrying logins (only after a good first connection)
-	 * @access public
-	 * @since 1.0.0
+	 * Called when user updates config fields (host/port).
 	 */
-	login() {
-		this.logout();
-
-		this.closing = false;
-
-		if(this.reconnecting) {
-			clearTimeout(this.reconnecting);
-			this.reconnecting = null;
-		}
-
-		// Connect to remote control websocket of ProPresenter
-		this.socket = new WebSocket('ws://'+this.config.host+':'+this.config.port+'/api/v3/');
-
-		this.socket.on('open', () => {
-			this.status(this.STATUS_OK);
-			this.sendData({
-				'sequenceNumber':1,
-				'action':'get'
-			});
-		});
-
-		this.socket.on('error', (err) => {
-			console.log(err);
-			this.status(this.STATUS_ERROR, err.message);
-		});
-
-		this.socket.on('close', (code, reason) => {
-			this.status(this.STATUS_ERROR, 'Disconnected from Smaart');
-			if(!this.closing){
-				this.keep_login_retry(this.RECONNECT_TIMEOUT);
-			}
-		});
-
-		this.socket.on('message', (message) => {
-			try {
-				let jsonMsg = JSON.parse(message);
-
-				if(jsonMsg['response']['error'] != undefined) {
-					if(jsonMsg['response']['error'] === "incorect password") {
-						this.status(this.STATUS_ERROR);
-						this.log('error', 'Password is incorrect.');
-						this.keep_login_retry(10);
-					}
-				}
-				else{
-					this.status(this.STATUS_OK);
-
-					if((jsonMsg['sequenceNumber'] === 1) && (jsonMsg['response']['authenticationRequired'])) {
-						this.log('info', 'Authenticating');
-						this.sendData({
-							"action":"set",
-							"properties": [
-								{
-									"password": this.config.password
-								}
-							]
-						});
-					}
-				}
-			}
-			catch (e) {
-				this.status(this.STATUS_ERROR);
-				this.log('error', 'Parsing Error.');
-			}
-		});
-	}
-
-
-
 	async configUpdated(config) {
 		this.config = config
+		this.initTCP()
 	}
 
-// Return config fields for web config
+	/**
+	 * Defines the config fields seen in "Edit Instance" (IP, port).
+	 */
 	getConfigFields() {
 		return [
-			{
-				type: 'static-text',
-				id: 'info',
-				width: 12,
-				label: 'Information',
-				value: 'This will connect with Rational Acoustics Smaart server.<br> If using Smaart V9 or newer this module will not work!'
-			},
 			{
 				type: 'textinput',
 				id: 'host',
@@ -170,183 +74,109 @@ class ModuleInstance extends InstanceBase {  //PREV constructor(system, id, conf
 				width: 4,
 				regex: Regex.PORT,
 			},
-			{
-				type: 'static-text',
-				id: 'info',
-				width: 12,
-				label: 'Information',
-				value: 'If authentication is not used leave password blank.'
-			},
-			{
-				type: 'textinput',
-				id: 'password',
-				label: 'Password',
-				width: 6
-			}
 		]
 	}
 
+	/**
+	 * Create or reconnect the TCP socket to Smaart.
+	 */
+	initTCP() {
+		this.closeSocket()
+
+		// If no host is configured, mark as bad config
+		if (!this.config.host) {
+			this.updateStatus(InstanceStatus.BadConfig, 'No host configured')
+			this.isConnected = false
+			return
+		}
+
+		// Mark status as connecting
+		this.updateStatus(InstanceStatus.Connecting, 'Connecting to Smaart...')
+		this.isConnected = false
+
+		// Create a new TCPHelper to connect
+		this.socket = new TCPHelper(this.config.host, this.config.port)
+
+		// Listen for status changes
+		this.socket.on('status_change', (status, message) => {
+			this.log('debug', `Socket status: ${status}, message: ${message || ''}`)
+			switch (status) {
+				case 'ok':
+					this.updateStatus(InstanceStatus.Ok, 'Connected')
+					this.isConnected = true
+					break
+
+				case 'connecting':
+					this.updateStatus(InstanceStatus.Connecting, 'Connecting...')
+					this.isConnected = false
+					break
+
+				case 'disconnected':
+					this.updateStatus(InstanceStatus.Disconnected, 'Disconnected')
+					this.isConnected = false
+					break
+
+				default:
+					// e.g. 'unknown_error', etc.
+					this.updateStatus(InstanceStatus.UnknownError, message)
+					this.isConnected = false
+					break
+			}
+		})
+
+		// Listen for incoming data
+		this.socket.on('data', (chunk) => {
+			const dataStr = chunk.toString('utf8').trim()
+			this.log('debug', `Received from Smaart: ${dataStr}`)
+			// If needed, parse or handle Smaart responses here
+		})
+
+		// Listen for errors
+		this.socket.on('error', (err) => {
+			this.log('error', `Socket error: ${err.message}`)
+			this.updateStatus(InstanceStatus.ConnectionFailure, err.message)
+			this.isConnected = false
+		})
+	}
+
+	/**
+	 * Close the socket if it exists.
+	 */
+	closeSocket() {
+		if (this.socket) {
+			this.socket.destroy()
+			this.socket = undefined
+		}
+	}
+
+	/**
+	 * Load and register all actions from actions.js
+	 */
 	updateActions() {
 		UpdateActions(this)
 	}
 
+	/**
+	 * Load and register all feedbacks from feedbacks.js
+	 */
 	updateFeedbacks() {
 		UpdateFeedbacks(this)
 	}
 
+	/**
+	 * Load and register all presets from presets.js
+	 */
+	updatePresets() {
+		UpdatePresets(this)
+	}
+
+	/**
+	 * Load and register variable definitions from variables.js
+	 */
 	updateVariableDefinitions() {
 		UpdateVariableDefinitions(this)
 	}
-
-	
-	
-
-	sendData(jsonPayload) {
-		if(this.socket != undefined){
-			this.socket.send(JSON.stringify(jsonPayload));
-		}
-		else{
-			this.log('error', 'Not connected!');
-		}
-	}
-
-	
-
-	/**
-	 * Sends command to change tabs
-	 * @access public
-	 * @since 1.0.0
-	 */
-	selectTab(tabName) {
-		let payload = {
-			"sequenceNumber":11,
-			"action":"set",
-			"target":"tabs",
-			"properties": [
-				{
-					"activeTab":tabName
-				}
-			]
-		};
-
-		this.sendData(payload);
-	}
-
-	/**
-	 * Sends command to start all measurments on a tab
-	 * @access public
-	 * @since 1.0.0
-	 */
-	startAllMeasurements(tabName) {
-		let payload = {
-			"sequenceNumber":12,
-			"action":"set",
-			"target": {
-				"tabName":tabName,
-				"measurementName": "allMeasurements"
-			},
-			"properties": [
-				{"active": true }
-			]
-		};
-
-		this.sendData(payload);
-	}
-
-	/**
-	 * Sends command to turn the generator on or off
-	 * @access public
-	 * @since 1.0.0
-	 */
-	generatorState(state) {
-		let payload = {
-			"sequenceNumber":13,
-			"action":"set",
-			"target":"signalGenerator",
-			"properties": [
-				{ "active":state }
-			]
-		};
-
-		this.sendData(payload);
-	}
-
-	/**
-	 * Sends command to set the generator level
-	 * @access public
-	 * @since 1.0.0
-	 */
-	setGeneratorLevel(level) {
-		let payload = {
-		    "sequenceNumber":14,
-		    "action":"set",
-		    "target":"signalGenerator",
-		    "properties": [
-		        { "gain":level }
-		    ]
-		};
-
-		this.sendData(payload);
-	}
-
-	/**
-	 * Sends command to turn tracking for an entire tab on or off
-	 * @access public
-	 * @since 1.0.0
-	 */
-	trackingState(state) {
-		let payload = {
-			"sequenceNumber":15,
-			"action":"set",
-			"target": {
-				"measurementName": "allTransferFunctionMeasurements"
-			},
-			"properties": [
-				{ "trackingDelay": state }
-			]
-		};
-		this.sendData(payload);
-	}
-
-	/**
-	 * Sends command to issueCommand handler
-	 * @access public
-	 * @since 1.0.0
-	 */
-	issueCommand(command) {
-		let payload = {
-			"sequenceNumber":16,
-			"action":"issueCommand",
-			"properties": [
-				{ "keypress": command }
-			]
-		};
-		console.log(payload);
-		this.sendData(payload);
-	}
-
-
-	// When module gets deleted
-	async destroy() {
-		this.log('debug', 'destroy') //NEW
-
-		this.closing = true;
-		if(this.reconnecting) {
-			clearTimeout(this.reconnecting);
-			this.reconnecting = null;
-		}
-
-		if (this.socket !== undefined) {
-			// Disconnect if already connected
-			if (this.socket.readyState !== 3 /*CLOSED*/) {
-				this.socket.terminate();
-			}
-			delete this.socket;
-		}
-		
-	}
 }
 
-exports = module.exports = instance; //OLD
-
-runEntrypoint(ModuleInstance, UpgradeScripts) //NEW
+// If you have no upgrade scripts, replace UpgradeScripts with []
+runEntrypoint(ModuleInstance, UpgradeScripts)

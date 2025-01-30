@@ -1,7 +1,15 @@
-module.exports = function (self) {
-	self.setVariableDefinitions([
-		{ variableId: 'variable1', name: 'My first variable' },
-		{ variableId: 'variable2', name: 'My second variable' },
-		{ variableId: 'variable3', name: 'Another variable' },
-	])
+// variables.js
+
+const VARIABLE_DEFINITIONS = [
+	{ variableId: 'connected', name: 'Smaart is connected' },
+]
+
+export function updateVariables(instance) {
+	// 1) Define them:
+	instance.setVariableDefinitions(VARIABLE_DEFINITIONS)
+
+	// 2) Set their current values:
+	instance.setVariableValues({
+		connected: instance.isConnected ? 'true' : 'false',
+	})
 }

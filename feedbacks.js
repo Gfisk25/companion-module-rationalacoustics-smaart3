@@ -1,33 +1,23 @@
-const { combineRgb } = require('@companion-module/base')
+// feedbacks.js
+import { combineRgb } from '@companion-module/base'
 
-module.exports = async function (self) {
-	self.setFeedbackDefinitions({
-		ChannelState: {
-			name: 'Example Feedback',
+// A single feedback ID for "connected" status
+export const FEEDBACK_ID_IS_CONNECTED = 'is_connected'
+
+export function getFeedbacks(instance) {
+	return {
+		[FEEDBACK_ID_IS_CONNECTED]: {
 			type: 'boolean',
-			label: 'Channel State',
+			name: 'Is Connected',
+			description: 'If connected, change color',
 			defaultStyle: {
-				bgcolor: combineRgb(255, 0, 0),
-				color: combineRgb(0, 0, 0),
+				color: combineRgb(255, 255, 255),
+				bgcolor: combineRgb(0, 204, 0), // green
 			},
-			options: [
-				{
-					id: 'num',
-					type: 'number',
-					label: 'Test',
-					default: 5,
-					min: 0,
-					max: 10,
-				},
-			],
-			callback: (feedback) => {
-				console.log('Hello world!', feedback.options.num)
-				if (feedback.options.num > 5) {
-					return true
-				} else {
-					return false
-				}
+			options: [],
+			callback: () => {
+				return instance.isConnected
 			},
 		},
-	})
+	}
 }

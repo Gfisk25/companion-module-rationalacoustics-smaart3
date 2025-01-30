@@ -14,8 +14,7 @@
 		"url": "git+https://github.com/bitfocus/companion-module-rationalacoustics-smaart3.git"
 	},
 	"dependencies": {
-		"@companion-module/base": "~1.2.1",
-		"object-path": "^0.11.8",
+		"@companion-module/base": "~1.4",
 		"ws": "^7.5.10"
 	},
 	"devDependencies": {
